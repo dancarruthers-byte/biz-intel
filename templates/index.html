@@ -67,7 +67,20 @@
   const $ = (id) => document.getElementById(id);
   let markdown = "", company = "";
 
-  const render = (md) => { $("report").innerHTML = DOMPurify.sanitize(marked.parse(md)); };
+  const render = (md) => {
+    if (window.marked && window.DOMPurify) {
+      $("report").innerHTML = DOMPurify.sanitize(marked.parse(md));
+    } else {
+      // Markdown libraries failed to load (offline / blocked CDN): show raw text.
+      $("report").innerHTML = "";
+      if (md) {
+        const pre = document.createElement("pre");
+        pre.style.whiteSpace = "pre-wrap";
+        pre.textContent = md;
+        $("report").appendChild(pre);
+      }
+    }
+  };
   const setStatus = (msg, isError = false) => {
     $("status").textContent = msg;
     $("status").className = isError ? "error" : "";

@@ -50,6 +50,11 @@ def report():
             yield sse({"type": "error", "message": f"API error ({e.status_code}): {e.message}"})
         except anthropic.APIConnectionError:
             yield sse({"type": "error", "message": "Could not reach the Anthropic API."})
+        except TypeError as e:
+            # The SDK raises TypeError when no API key or auth token is configured.
+            if "authentication" not in str(e):
+                raise
+            yield sse({"type": "error", "message": "No Anthropic credentials found - set ANTHROPIC_API_KEY and restart."})
         except Exception:
             app.logger.exception("Report generation failed")
             yield sse({"type": "error", "message": "Report generation failed - check the server logs."})
