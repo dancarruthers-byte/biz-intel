@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Biz Intel</title>
+  <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+  <style>
+    :root {
+      --bg: #f7f7f5; --panel: #fff; --text: #1d1d1f; --muted: #6b6b70;
+      --border: #e2e2e0; --accent: #2457d6; --error: #b42318;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #141416; --panel: #1d1d20; --text: #ececee; --muted: #9a9aa2;
+        --border: #2e2e33; --accent: #7aa2ff; --error: #ff8a80;
+      }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text);
+      font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+    main { max-width: 860px; margin: 0 auto; padding: 32px 16px 64px; }
+    h1.app { margin: 0 0 4px; font-size: 1.6rem; }
+    .sub { margin: 0 0 24px; color: var(--muted); }
+    form { display: grid; gap: 10px; grid-template-columns: 1fr auto; }
+    input { width: 100%; padding: 10px 12px; font: inherit; color: var(--text);
+      background: var(--panel); border: 1px solid var(--border); border-radius: 8px; }
+    input#focus { grid-column: 1 / -1; }
+    button { padding: 10px 18px; font: inherit; font-weight: 600; border: 0; border-radius: 8px;
+      background: var(--accent); color: #fff; cursor: pointer; }
+    button:disabled { opacity: .55; cursor: default; }
+    button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--border); }
+    #status { margin: 20px 0 0; color: var(--muted); font-size: .92rem; min-height: 1.4em; }
+    #status.error { color: var(--error); }
+    #report { margin-top: 16px; padding: 24px; background: var(--panel);
+      border: 1px solid var(--border); border-radius: 12px; overflow-x: auto; }
+    #report:empty { display: none; }
+    #report table { border-collapse: collapse; margin: 12px 0; }
+    #report th, #report td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+    #report a { color: var(--accent); }
+    .actions { display: none; gap: 8px; margin-top: 12px; }
+    .actions.show { display: flex; }
+    @media (max-width: 520px) { form { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1 class="app">Business Intelligence Report</h1>
+  <p class="sub">Enter a company and get a researched report with sources.</p>
+
+  <form id="form">
+    <input id="company" placeholder="Company name, e.g. Shopify or Stripe" required maxlength="200" autofocus>
+    <button id="go" type="submit">Generate</button>
+    <input id="focus" placeholder="Optional focus, e.g. AI strategy, European expansion" maxlength="500">
+  </form>
+
+  <div id="status"></div>
+  <article id="report"></article>
+  <div class="actions" id="actions">
+    <button class="secondary" id="download" type="button">Download .md</button>
+    <button class="secondary" id="print" type="button">Print / PDF</button>
+  </div>
+</main>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  let markdown = "", company = "";
+
+  const render = (md) => { $("report").innerHTML = DOMPurify.sanitize(marked.parse(md)); };
+  const setStatus = (msg, isError = false) => {
+    $("status").textContent = msg;
+    $("status").className = isError ? "error" : "";
+  };
+
+  $("form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    company = $("company").value.trim();
+    if (!company) return;
+    markdown = "";
+    render("");
+    $("actions").classList.remove("show");
+    $("go").disabled = true;
+    setStatus("Starting research… this usually takes a minute or two.");
+
+    try {
+      const res = await fetch("/api/report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ company, focus: $("focus").value.trim() }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Request failed (${res.status})`);
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "", finished = false;
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const chunks = buffer.split("\n\n");
+        buffer = chunks.pop();
+        for (const chunk of chunks) {
+          if (!chunk.startsWith("data: ")) continue;
+          const ev = JSON.parse(chunk.slice(6));
+          if (ev.type === "status") setStatus(ev.message);
+          else if (ev.type === "text") { markdown += ev.delta; render(markdown); setStatus("Writing report…"); }
+          else if (ev.type === "done") {
+            markdown = ev.markdown; render(markdown); finished = true;
+            setStatus(`Done — ${ev.sources.length} sources.`);
+            $("actions").classList.add("show");
+          } else if (ev.type === "error") throw new Error(ev.message);
+        }
+      }
+      if (!finished) throw new Error("Connection closed before the report finished.");
+    } catch (err) {
+      setStatus(err.message, true);
+    } finally {
+      $("go").disabled = false;
+    }
+  });
+
+  $("download").addEventListener("click", () => {
+    const blob = new Blob([markdown], { type: "text/markdown" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${company.replace(/[^\w-]+/g, "_")}_report.md`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+  $("print").addEventListener("click", () => window.print());
+</script>
+</body>
+</html>
