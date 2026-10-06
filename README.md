@@ -54,3 +54,9 @@ The tests use a fake client, so they run offline without an API key:
 pip install pytest
 pytest
 ```
+
+## Hosted version
+
+`hosted/company-dossier.html` is published as a claude.ai artifact: https://claude.ai/artifact/B5sXDkjDE1P8yq8QzE18gi
+
+It needs no server or API key, because it calls Claude through the viewer's own claude.ai account. It can't browse the web, so its reports come from Claude's knowledge plus any recent notes the user pastes in. Use the Flask app above when you need live web research.
